@@ -284,6 +284,35 @@ class Step(object):
                 step.cancel()
 
 
+class SyncStep(Step):
+
+    def __init__(self, step_type, repo=None, sync_conduit=None, config=None, working_dir=None,
+                 importer_type=None):
+        """
+        Set the default parent, step_type and unit_type for the the publish step
+        the unit_type defaults to none since some steps are not used for processing units.
+
+        :param step_type: The id of the step this processes
+        :type step_type: str
+        :param repo: The repo to be published
+        :type repo: pulp.plugins.model.Repository
+        :param sync_conduit: The sync conduit for the repo to be synced
+        :type sync_conduit: RepoPublishConduit
+        :param config: The sync configuration
+        :type config: PluginCallConfiguration
+        :param working_dir: The temp directory this step should use for processing
+        :type working_dir: str
+        :param importer_type: The type of the importer that is being used
+        :type importer_type: str
+        """
+        super(SyncStep, self).__init__(step_type, sync_conduit)
+        self.importer_type = importer_type
+        self.working_dir = working_dir
+        self.repo = repo
+        self.sync_conduit = sync_conduit
+        self.config = config
+
+
 class PublishStep(Step):
 
     def __init__(self, step_type, repo=None, publish_conduit=None, config=None, working_dir=None,
@@ -495,7 +524,7 @@ class UnitPublishStep(PublishStep):
         the unit_type defaults to none since some steps are not used for processing units.
 
         :param step_type: The id of the step this processes
-        :typstep_typeid: str
+        :type step_typeid: str
         :param unit_type: The type of unit this step processes
         :type unit_type: str or list of str
         """
