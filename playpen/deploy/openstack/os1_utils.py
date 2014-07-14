@@ -2,30 +2,22 @@ import os
 import time
 
 from glanceclient import client as glance_client
-from fabric import network as fabric_network
-from fabric.api import env, run, put, settings
 from keystoneclient.v2_0 import client as keystone_client
 from novaclient.v1_1 import client as nova_client
-from novaclient.v1_1.servers import REBOOT_SOFT
 
 
-# Various constants
+# Constants
 OPENSTACK_ACTIVE_KEYWORD = 'ACTIVE'
+OPENSTACK_BUILD_KEYWORD = 'BUILD'
 DEFAULT_FLAVOR = 'm1.medium'
-DEFAULT_SEC_GROUP = 'default'
-DEFAULT_INSTANCE_PREFIX = 'pre-pulp-'
+DEFAULT_SEC_GROUP = 'jcline-pulp'
 META_USER_KEYWORD = 'user'
-META_IMAGE_TYPE_KEYWORD = 'pulp_image_type'
-PULP_SERVER = 'pre-pulp-server'
-
-# Fabric configuration
-env.connection_attempts = 4
-env.timeout = 30
-env.disable_known_hosts = True
-env.abort_on_prompts = True
+META_DISTRIBUTION_KEYWORD = 'pulp_distribution'
+META_OS_NAME_KEYWORD = 'os_name'
+META_OS_VERSION_KEYWOR = 'os_version'
 
 
-def os1_authenticate(username=None, password=None, tenant_id=None, tenant_name=None, auth_url=None):
+def authenticate(username=None, password=None, tenant_id=None, tenant_name=None, auth_url=None):
     """
     Authenticates with keystone, nova, and glance using the given arguments, or using
     environment variables if an argument is None. These are the same environment variables
@@ -67,7 +59,27 @@ def os1_authenticate(username=None, password=None, tenant_id=None, tenant_name=N
     return glance, keystone, nova
 
 
-def create_instance(nova, image_id, instance_name, security_groups, flavor_name, key_name, cloud_config=None):
+def get_pulp_images(nova):
+    """
+    Return all images containing the META_DISTRIBUTION_KEYWORD
+
+    :param nova: the nova client to use when retrieving the list of images
+    :type  nova: novaclient.v1_1.client.Client
+
+    :return: a list of of novaclient.images.Image
+    :rtype:  list
+    """
+    image_list = nova.images.list()
+    pulp_images = []
+    for image in image_list:
+        meta = image.metadata
+        if META_DISTRIBUTION_KEYWORD in meta:
+            pulp_images.append(image)
+
+    return pulp_images
+
+
+def create_instance(nova, image_id, instance_name, security_groups, flavor_name, key_name, metadata=None):
     """
     Builds an instance using the given nova client. This call will block until Openstack says the
     instance is 'active'. Note: this just means Openstack has successfully started the boot process.
@@ -88,8 +100,8 @@ def create_instance(nova, image_id, instance_name, security_groups, flavor_name,
     :param key_name:        The name of the key pair to use for this instance. This should exist in
                             Openstack already.
     :type  key_name:        str
-    :param cloud_config:    The path to a valid user data file to pass to cloud-init. This is optional.
-    :type  cloud_config:    str
+    :param metadata:        A dictionary to attach to the running instance. Maximum of entries.
+    :type  metadata:        dict
 
     :return: The instance
     :rtype:  nova.servers.Server
@@ -98,19 +110,21 @@ def create_instance(nova, image_id, instance_name, security_groups, flavor_name,
     flavor = nova.flavors.find(name=flavor_name)
     if not isinstance(security_groups, list):
         security_groups = [security_groups]
-    user_data = None
-    if cloud_config:
-        user_data = open(cloud_config)
 
-    server = nova.servers.create(instance_name, image_id, flavor,
-                                 security_groups=security_groups, key_name=key_name, userdata=user_data)
-    if user_data:
-        user_data.close()
+    server = nova.servers.create(instance_name, image_id, flavor, security_groups=security_groups,
+                                 key_name=key_name, meta=metadata)
 
-    # Hang out until Openstack says the VM is up
-    while server.status != OPENSTACK_ACTIVE_KEYWORD:
-        time.sleep(10)
-        server = nova.servers.get(server.id)
+    # Hang out until Openstack says the VM is up or we give up
+    for x in range(0, 300, 10):
+        if server.status == OPENSTACK_BUILD_KEYWORD:
+            time.sleep(10)
+            server = nova.servers.get(server.id)
+        else:
+            break
+
+    if server.status != OPENSTACK_ACTIVE_KEYWORD:
+        server.delete()
+        raise RuntimeError('Aborting - failed to build the following instance: ' + instance_name)
 
     return server
 
@@ -135,15 +149,15 @@ def create_image(glance, image_location):
     }
 
     with open(image_location) as image_data:
-        image = glance.images.create(**image_attributes)
-        image.update(data=image_data)
+        new_image = glance.images.create(**image_attributes)
+        new_image.update(data=image_data)
 
-    return image
+    return new_image
 
 
 def take_snapshot(nova, server, snapshot_name, metadata=None):
     """
-    Take a snapshot of given server. This call will hang until Openstack
+    Take a snapshot of given server. This call will block until Openstack
     reports that the snapshot is active.
 
     :param nova:            An instance of the nova client
@@ -171,86 +185,15 @@ def take_snapshot(nova, server, snapshot_name, metadata=None):
     return snapshot
 
 
-def fabric_yum_update(host_string, key_file):
-    """
-    This will run 'yum -y update' on the given host
-
-    :param host_string: The host to connect to: in the form 'user@host'
-    :type  host_string: str
-    :param key_file:    The absolute path to the private key to use when connecting as 'user'
-    :type  key_file:    str
-    """
-    try:
-        with settings(host_string=host_string, key_file=key_file, quiet=True):
-            run('sudo yum -y update')
-    finally:
-        fabric_network.disconnect_all()
-
-
-def fabric_yum_install(host_string, key_file, package_name):
-    """
-    Install a package on a host using yum
-
-    :param host_string:     The host to connect to: in the form 'user@host'
-    :type  host_string:     str
-    :param key_file:        The absolute path to the private key to use when connecting as 'user'
-    :type  key_file:        str
-    :param package_name:    The name of the package to install
-    :type  package_name:    str
-    """
-    try:
-        with settings(host_string=host_string, key_file=key_file, quiet=True):
-            run('sudo yum -y install ' + package_name)
-    finally:
-        fabric_network.disconnect_all()
-
-
-def fabric_apply_puppet(host_string, key_file, local_module, remote_location):
-    """
-    Apply a puppet module to the given host. It is your responsibility to install
-    any puppet module dependencies, and to ensure puppet is installed.
-
-    :param host_string:     The host to connect to: in the form 'user@host'
-    :type  host_string:     str
-    :param key_file:        The absolute path to the private key to use when connecting as 'user'
-    :type  key_file:        str
-    :param local_module:    The absolute path to the puppet module to put on the remote host
-    :param remote_location: the location to put this puppet module on the remote host
-    """
-    try:
-        with settings(host_string=host_string, key_file=key_file, quiet=True):
-            put(local_module, remote_location)
-            run('sudo puppet apply ' + remote_location)
-    finally:
-        fabric_network.disconnect_all()
-
-
-def reboot_instance(instance, host_string, key_file):
-    instance.reboot(reboot_type=REBOOT_SOFT)
-    fabric_confirm_ssh_key(host_string, key_file)
-
-
-def fabric_confirm_ssh_key(host_string, key_file):
-    """
-    This is a utility to make sure fabric can ssh into the host with the given key. This is useful
-    when a remote host is being set up by cloud-init, which can bring the ssh server up before
-    installing the public key.
-
-    :param host_string:
-    :param key_file:
-    :return:
-    """
-    # It can take some time for the init scripts to insert the public key into an instance
-    # Abort on prompt is set, so catch the SystemExit exception and sleep for a while.
-    with settings(host_string=host_string, key_file=key_file, quiet=True):
-        for x in xrange(0, 10):
-            try:
-                run('whoami')
-                break
-            except SystemExit:
-                time.sleep(30)
-
-
 def get_instance_ip(instance):
+    """
+    Get an OS1 Internal public ip address
+
+    :param instance: a server instance with a public ip address
+    :type  instance: nova.servers.Server
+
+    :return: the public ip address
+    :rtype:  str
+    """
     public_ip = instance.networks['os1-internal-1319'][1]
-    return public_ip.encode('ascii', 'ignore')
+    return public_ip.encode('ascii')

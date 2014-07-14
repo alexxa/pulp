@@ -29,11 +29,10 @@ class pulp::globals (
             package { "redhat-lsb":
                 ensure => 'installed'
             } ->
-            $os_pathname = "${::lsbmajdistrelease}Server" ->
             yumrepo { "Pulp repo":
                 name     => $repo_name,
                 descr    => $repo_descr,
-                baseurl  => "$repo_baseurl/$os_pathname/${::architecture}/",
+                baseurl  => "$repo_baseurl/${::lsbmajdistrelease}Server/${::architecture}/",
                 enabled  => $repo_enabled,
                 gpgcheck => $repo_gpgcheck
             }
