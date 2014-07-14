@@ -3,7 +3,9 @@
 import argparse
 import json
 import os
+import tempfile
 import time
+import sys
 import yaml
 
 from fabric import network as fabric_network
@@ -56,7 +58,7 @@ AUTHORIZE_ROOT_SSH = 'sudo cp ~/.ssh/authorized_keys /root/.ssh/authorized_keys'
 TEMPORARY_MANIFEST_LOCATION = '/tmp/manifest.pp'
 REMOTE_PUPPET_APPLY = 'sudo puppet apply ' + TEMPORARY_MANIFEST_LOCATION
 PUPPET_MODULE_INSTALL = 'sudo puppet module install --force '
-YUM_INSTALL_TEMPLATE = 'sudo yum install %s'
+YUM_INSTALL_TEMPLATE = 'sudo yum -y install %s'
 
 # The version of gevent provided by Fedora/RHEL is too old, so force it to update here.
 # It seems like setup.py needs to be run twice for now.
@@ -262,8 +264,10 @@ def fabric_confirm_ssh_key(host_string, key_file):
     when a remote host is being set up by cloud-init, which can bring the ssh server up before
     installing the public key. It will try for 300 seconds, after which it will raise a SystemExit.
 
-    :param host_string:
-    :param key_file:
+    :param host_string:     The host to connect to: in the form 'user@host'
+    :type  host_string:     str
+    :param key_file:        The absolute path to the private key to use when connecting as 'user'
+    :type  key_file:        str
 
     :raises RuntimeError: if it was unable to ssh in after 300 seconds
     """
@@ -294,18 +298,44 @@ def get_instance_ip(instance):
     return public_ip.encode('ascii')
 
 
-def configure_server(host_string, key_file, puppet_manifest, server_hostname):
+def inject_external_fact(host_string, key_file, facts):
+    """
+    Make Puppet facts available to a remote host. Note that this will simply dump
+    the file in /etc/facter/facts.d/facts.json which might overwrite other facts.
+
+    :param host_string: remote host to add facts to; the expected format is 'user@ip'
+    :param key_file: the absolute or relative path to the ssh key to use
+    :param facts: a dictionary of facts; each key is a Puppet fact. The key
+    names must follow the Puppet fact name rules.
+    """
+    with settings(host_string=host_string, key_file=key_file):
+        fabric_confirm_ssh_key(host_string, key_file)
+
+        # Write the temporary json file to dump
+        file_descriptor, path = tempfile.mkstemp()
+        os.write(file_descriptor, json.dumps(facts))
+        os.close(file_descriptor)
+
+        # Place it on the remote host and clean up
+        put(path)
+        temp_filename = os.path.basename(path)
+        run('sudo mkdir -p /etc/facter/facts.d/')
+        run('sudo mv ' + temp_filename + ' /etc/facter/facts.d/facts.json')
+        os.remove(path)
+
+
+def configure_server(host_string, key_file, repository, puppet_manifest, server_hostname):
     """
     Set up a Pulp server using Fabric and a puppet module. Fabric will apply the given
     host name, ensure puppet and any modules declared in PUPPET_MODULES are installed,
     and will then apply the puppet manifest.
 
-    :param host_string:     The host string for the server. This should be in the format
-    'user@ip'
+    :param host_string:     The host string for the server. This should be in the format 'user@ip'
     :type  host_string:     str
-    :param key_file:        The absolute path to the private key to use when logging into the
-    server.
+    :param key_file:        The path to the private key to use when logging into the server.
     :type  key_file:        str
+    :param repository:      The path to the repository to install from
+    :type  repository:      str
     :param puppet_manifest: The absolute path to the puppet manifest to apply on the server
     :type  puppet_manifest: str
     :param server_hostname: The hostname to set on the server
@@ -324,11 +354,16 @@ def configure_server(host_string, key_file, puppet_manifest, server_hostname):
         for module in PUPPET_MODULES:
             run(PUPPET_MODULE_INSTALL + module)
 
+        # Add external facts to the server
+        puppet_external_facts = {'pulp_repo': repository}
+        inject_external_fact(host_string, key_file, puppet_external_facts)
+
         # Apply the manifest to the server
         fabric_apply_puppet(host_string, key_file, puppet_manifest)
 
 
-def configure_consumer(host_string, key_file, puppet_manifest, server_ip, server_hostname, consumer_hostname):
+def configure_consumer(host_string, key_file, repository, puppet_manifest, server_ip,
+                       server_hostname, consumer_hostname):
     """
     Set up a Pulp consumer using Fabric and a puppet module. Fabric will apply the given consumer
     hostname, ensure root can ssh into the consumer, ensure puppet and all modules in PUPPET_MODULES
@@ -340,6 +375,8 @@ def configure_consumer(host_string, key_file, puppet_manifest, server_ip, server
     :param key_file:            The absolute path to the private key to use when logging into the
     server.
     :type  key_file:            str
+    :param repository:          The path to the repository to install from
+    :type  repository:          str
     :param puppet_manifest:     The absolute path to the puppet manifest to apply on the server
     :type  puppet_manifest:     str
     :param server_ip:           The IP address of the Pulp server
@@ -365,13 +402,9 @@ def configure_consumer(host_string, key_file, puppet_manifest, server_ip, server
         # Add external facts to the consumer so it can find the server
         puppet_external_facts = {
             'external_pulp_server': server_hostname,
+            'pulp_repo': repository
         }
-        with open('pulp_external_facts.json', 'w') as pulp_facts:
-            json.dump(puppet_external_facts, pulp_facts)
-        put('pulp_external_facts.json', '~/pulp_external_facts.json')
-        run('sudo mkdir -p /etc/facter/facts.d/')
-        run('sudo mv pulp_external_facts.json /etc/facter/facts.d/')
-        os.remove('pulp_external_facts.json')
+        inject_external_fact(host_string, key_file, puppet_external_facts)
 
         # Apply the puppet module and write the /etc/hosts file
         fabric_apply_puppet(host_string, key_file, puppet_manifest)
@@ -521,27 +554,30 @@ def run_tests(args):
     tester_host_string = user_login + '@' + get_instance_ip(pulp_tester)
 
     # Apply the necessary configuration to each instance
-    configure_server(server_host_string, args.key_file, args.server_puppet, pulp_server_hostname)
-    configure_consumer(consumer_host_string, args.key_file, args.consumer_puppet, pulp_server_ip,
+    configure_server(server_host_string, args.key_file, args.repository, args.server_puppet, pulp_server_hostname)
+    configure_consumer(consumer_host_string, args.key_file, args.repository, args.consumer_puppet, pulp_server_ip,
                        pulp_server_hostname, pulp_consumer_hostname)
     configure_tester(tester_host_string, pulp_server_ip, pulp_server_hostname, pulp_consumer_ip,
                      pulp_consumer_hostname, args.key_file, os_name, os_version)
 
+    result = None
     if not args.setup_only:
         try:
-            print 'Running tests...'
             with settings(host_string=tester_host_string):
-                run('cd pulp-automation && nosetests --with-xunit', warn_only=True)
+                result = run('cd pulp-automation && nosetests -vs --with-xunit', warn_only=True)
                 get('pulp-automation/nosetests.xml')
-            print 'Done!'
         finally:
             tear_down([pulp_server, pulp_tester, pulp_consumer])
 
+    if result:
+        sys.exit(result.return_code)
+    else:
+        sys.exit(1)
 
 description = 'Deploy a Pulp test environment'
-consumer_hostname_help = 'The hostname to give the consumer; default is pulp-consumer-*timestamp*'
-server_hostname_help = 'The hostname to give the server; default is pulp-server-*timestamp*'
-tester_hostname_help = 'The hostname to give the tester; default is pulp-tester-*timestamp*'
+consumer_hostname_help = 'The hostname to give the consumer; default is pulp-consumer'
+server_hostname_help = 'The hostname to give the server; default is pulp-server'
+tester_hostname_help = 'The hostname to give the tester; default is pulp-tester'
 os1_username_help = 'username on OS1; this is not necessary if using OS_USERNAME environment variable'
 os1_password_help = 'password on OS1; this is not necessary if using OS_PASSWORD environment variable'
 os1_tenant_id_help = 'tenant ID on OS1; this is not necessary if using OS_TENANT_ID environment variable'
@@ -554,16 +590,18 @@ parser.add_argument('--key-file', help='the path to the private key of the OS1 k
 parser.add_argument('--os1-key', help='the name of the key pair in OS1 to use', required=True)
 parser.add_argument('--consumer-puppet', help='path to the consumer puppet module', required=True)
 parser.add_argument('--server-puppet', help='path to the server puppet module', required=True)
-parser.add_argument('--security-group', help='security group name to apply in OS1; default is \'pulp\'')
-parser.add_argument('--flavor', help='instance flavor to use; default is \'m1.medium\'')
+parser.add_argument('--security-group', default='pulp', help='security group name to apply in OS1')
+parser.add_argument('--flavor', default='m1.medium', help='instance flavor to use')
+parser.add_argument('--repository', default='http://satellite6.lab.eng.rdu2.redhat.com/pulp/testing/2.4/latest',
+                    help='the repository install Pulp from')
 parser.add_argument('--os1-username', help=os1_username_help)
 parser.add_argument('--os1-password', help=os1_password_help)
 parser.add_argument('--os1-tenant-id', help=os1_tenant_id_help)
 parser.add_argument('--os1-tenant-name', help=os1_tenant_name_help)
 parser.add_argument('--os1-auth-url', help=os1_auth_url_help)
-parser.add_argument('--consumer-hostname', help=consumer_hostname_help)
-parser.add_argument('--server-hostname', help=server_hostname_help)
-parser.add_argument('--tester-hostname', help=tester_hostname_help)
+parser.add_argument('--consumer-hostname', default='pulp-consumer', help=consumer_hostname_help)
+parser.add_argument('--server-hostname', default='pulp-server', help=server_hostname_help)
+parser.add_argument('--tester-hostname', default='pulp-tester', help=tester_hostname_help)
 parser.add_argument('--setup-only', action='store_true', help='setup, but do not run any tests')
 arguments = parser.parse_args()
 

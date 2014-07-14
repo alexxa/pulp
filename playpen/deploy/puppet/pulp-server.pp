@@ -1,6 +1,10 @@
-# This class installs and configures a Pulp server from the latest scratch build
+# This class installs and configures a Pulp server the repository specified
+# by the pulp_repo fact. This fact is retrieved from the FACTER_PULP_REPO
+# environment variable
 
 class pulp_server {
+    include stdlib
+
     service { 'iptables':
         enable => false,
         ensure => 'stopped'

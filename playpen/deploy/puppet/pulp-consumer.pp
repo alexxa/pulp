@@ -2,6 +2,7 @@
 
 class pulp_consumer {
     include stdlib
+
     class {'::pulp::globals':
         repo_descr   => 'Pulp Repository',
         repo_baseurl => $::pulp_repo

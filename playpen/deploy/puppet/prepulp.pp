@@ -1,6 +1,7 @@
 # This manifest installs and configures Pulp's dependencies
 
 class prepulp {
+    include stdlib
 
     $packages = [
         'python-qpid-qmf',
