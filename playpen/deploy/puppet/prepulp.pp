@@ -4,8 +4,13 @@ class prepulp {
     include stdlib
 
     $packages = [
-        'python-qpid-qmf',
+        'gcc',
+        'git',
+        'm2crypto',
+        'python-devel',
+        'python-pip',
         'python-qpid',
+        'python-qpid-qmf',
         'qpid-cpp-server-store',
         'redhat-lsb',
     ]

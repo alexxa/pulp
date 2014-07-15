@@ -118,7 +118,7 @@ def apply_puppet(host_string, key_file, local_module, remote_location=TEMPORARY_
         fabric_network.disconnect_all()
 
 
-def install_puppet_module(host_string, key_file, module_name, force=True):
+def install_puppet_modules(host_string, key_file, module_list, force=True):
     """
     Install a puppet module on a remote host
 
@@ -126,8 +126,8 @@ def install_puppet_module(host_string, key_file, module_name, force=True):
     :type  host_string:     str
     :param key_file:        The absolute path to the private key to use when connecting as 'user'
     :type  key_file:        str
-    :param module_name: the name of the module on puppet forge: for example, 'puppetlabs-stdlib'
-    :type  module_name: str
+    :param module_list: the list of the modules on puppet forge: for example, ['puppetlabs-stdlib']
+    :type  module_list: list
     :param force:       If true, install will use the force flag, which will cause puppet to
     reinstall modules. If this is not used and the module is already installed, puppet will
     not return 0.
@@ -135,10 +135,11 @@ def install_puppet_module(host_string, key_file, module_name, force=True):
     """
     try:
         with settings(hide('output'), host_string=host_string, key_file=key_file):
-            if force:
-                run('sudo puppet module install --force ' + module_name)
-            else:
-                run('sudo puppet module install ' + module_name)
+            for module in module_list:
+                if force:
+                    run('sudo puppet module install --force ' + module)
+                else:
+                    run('sudo puppet module install ' + module)
     finally:
         fabric_network.disconnect_all()
 

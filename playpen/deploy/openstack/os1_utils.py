@@ -197,3 +197,25 @@ def get_instance_ip(instance):
     """
     public_ip = instance.networks['os1-internal-1319'][1]
     return public_ip.encode('ascii')
+
+
+def reboot_instance(nova, server):
+    """
+    Reboot an instance, and wait for it to return to the active state.
+    If, after 2 minutes, it is not active, an exception is raised.
+
+    :param nova:    An instance of the nova client
+    :type  nova:    novaclient.v1_1.client.Client
+    :param server:  The active instance to reboot
+    :type  server:  novaclient.v1_1.servers.Server
+
+    :raise: RuntimeError if the reboot failed
+    """
+    server.reboot()
+    for x in range(0, 120, 10):
+        time.sleep(10)
+        server = nova.servers.get(server.id)
+        if server.status == OPENSTACK_ACTIVE_KEYWORD:
+            break
+    else:
+        raise RuntimeError('Reboot is hanging. Please fix it manually.')

@@ -12,7 +12,7 @@ import setup_utils
 
 
 # The distribution to use for the automated tests. Must be Fedora 19+ or RHEL7
-TESTER_DISTRIBUTION = 'fc20'
+TESTER_DISTRIBUTION = 'el7'
 
 # Constants for pulp-automation YAML configuration
 CONSUMER_YAML_KEY = 'consumers'
@@ -116,7 +116,7 @@ def run_tests(args):
         pulp_consumer = os1_utils.create_instance(nova_instance, pulp_image.id, pulp_consumer_hostname,
                                                   security_group, instance_flavor, args.os1_key, metadata)
         instances.append(pulp_consumer)
-        pulp_tester = os1_utils.create_instance(nova_instance, pulp_image.id, pulp_tester_hostname,
+        pulp_tester = os1_utils.create_instance(nova_instance, test_suite_image.id, pulp_tester_hostname,
                                                 security_group, instance_flavor, args.os1_key, metadata)
         instances.append(pulp_tester)
 
@@ -129,6 +129,7 @@ def run_tests(args):
         tester_host_string = user_login + '@' + os1_utils.get_instance_ip(pulp_tester)
 
         # Apply the necessary configuration to each instance
+        # TODO Make sure a failure here causes a clear error message and cleanup
         setup_utils.configure_server(server_host_string, args.key_file, args.repository,
                                      args.server_puppet, pulp_server_hostname)
         setup_utils.configure_consumer(consumer_host_string, args.key_file, args.repository, args.consumer_puppet,
