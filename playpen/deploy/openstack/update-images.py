@@ -2,7 +2,7 @@
 import argparse
 
 import os1_utils
-import setup_utils
+from playpen.deploy.common import setup_utils
 
 
 DEPENDENCY_LIST = ['puppet']
@@ -52,3 +52,6 @@ for image in pulp_images:
 
     snapshot = os1_utils.take_snapshot(nova, instance, image.name)
     instance.delete()
+
+    msg = "Review the new image [%s] before removing the old image [%s]" % snapshot.id, image.id
+    print msg

@@ -115,7 +115,7 @@ def create_instance(nova, image_id, instance_name, security_groups, flavor_name,
                                  key_name=key_name, meta=metadata)
 
     # Hang out until Openstack says the VM is up or we give up
-    for x in range(0, 300, 10):
+    for x in range(0, 600, 10):
         if server.status == OPENSTACK_BUILD_KEYWORD:
             time.sleep(10)
             server = nova.servers.get(server.id)

@@ -3,6 +3,9 @@
 class pulp_consumer {
     include stdlib
 
+    augeas { "yum.conf":
+        changes => "set /files/etc/yum.conf/main/http_caching packages"
+    } ->
     class {'::pulp::globals':
         repo_descr   => 'Pulp Repository',
         repo_baseurl => $::pulp_repo

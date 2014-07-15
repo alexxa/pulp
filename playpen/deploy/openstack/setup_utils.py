@@ -50,7 +50,7 @@ YUM_UPDATE_COMMAND = 'sudo  yum -y update'
 # The version of gevent provided by Fedora/RHEL is too old, so force it to update here.
 # It seems like setup.py needs to be run twice for now.
 INSTALL_TEST_SUITE = 'git clone https://github.com/RedHatQE/pulp-automation.git \
-&& sudo pip install -U greenlet gevent && cd pulp-automation && sudo python ./setup.py install \
+&& sudo pip install -U greenlet gevent requests && cd pulp-automation && sudo python ./setup.py install \
 && sudo python ./setup.py install'
 
 HOSTS_TEMPLATE = "echo '%(ip)s    %(hostname)s %(hostname)s.novalocal' | sudo tee -a /etc/hosts"
@@ -74,12 +74,8 @@ def yum_install(host_string, key_file, package_list):
 
     with settings(hide('output'), host_string=host_string, key_file=key_file):
         for package in package_list:
-            try:
-                run(YUM_INSTALL_TEMPLATE % package)
-            except SystemExit as e:
-                raise RuntimeError(package + ' failed to install: ' + e.message)
-            finally:
-                fabric_network.disconnect_all()
+            run(YUM_INSTALL_TEMPLATE % package)
+    fabric_network.disconnect_all()
 
 
 def yum_update(host_string, key_file):
@@ -90,12 +86,11 @@ def yum_update(host_string, key_file):
     :type  host_string:     str
     :param key_file:        The absolute path to the private key to use when connecting as 'user'
     :type  key_file:        str
+
+    :raise SystemExit: if the YUM_UPDATE_COMMAND fails
     """
     with settings(hide('output'), host_string=host_string, key_file=key_file):
-        try:
-            run(YUM_UPDATE_COMMAND)
-        finally:
-            fabric_network.disconnect_all()
+        run(YUM_UPDATE_COMMAND)
 
 
 def apply_puppet(host_string, key_file, local_module, remote_location=TEMPORARY_MANIFEST_LOCATION):
@@ -109,13 +104,13 @@ def apply_puppet(host_string, key_file, local_module, remote_location=TEMPORARY_
     :type  key_file:        str
     :param local_module:    The absolute path to the puppet module to put on the remote host
     :param remote_location: the location to put this puppet module on the remote host
+
+    :raise SystemExit: if the applying the puppet module fails
     """
-    try:
-        with settings(host_string=host_string, key_file=key_file, quiet=True):
-            put(local_module, remote_location)
-            run('sudo puppet apply ' + remote_location)
-    finally:
-        fabric_network.disconnect_all()
+    with settings(host_string=host_string, key_file=key_file, ok_ret_codes=[0, 2]):
+        put(local_module, remote_location)
+        run('sudo puppet apply --verbose --detailed-exitcodes ' + remote_location)
+    fabric_network.disconnect_all()
 
 
 def install_puppet_modules(host_string, key_file, module_list, force=True):
@@ -132,15 +127,15 @@ def install_puppet_modules(host_string, key_file, module_list, force=True):
     reinstall modules. If this is not used and the module is already installed, puppet will
     not return 0.
     :type  force: bool
+
+    :raise SystemExit: if installing a puppet module fails
     """
-    try:
-        with settings(hide('output'), host_string=host_string, key_file=key_file):
-            for module in module_list:
-                if force:
-                    run('sudo puppet module install --force ' + module)
-                else:
-                    run('sudo puppet module install ' + module)
-    finally:
+    with settings(hide('output'), host_string=host_string, key_file=key_file):
+        for module in module_list:
+            if force:
+                run('sudo puppet module install --force ' + module)
+            else:
+                run('sudo puppet module install ' + module)
         fabric_network.disconnect_all()
 
 
@@ -155,7 +150,7 @@ def fabric_confirm_ssh_key(host_string, key_file):
     :param key_file:        The absolute path to the private key to use when connecting as 'user'
     :type  key_file:        str
 
-    :raises RuntimeError: if it was unable to ssh in after 300 seconds
+    :raises SystemExit: if it was unable to ssh in after 300 seconds
     """
     # It can take some time for the init scripts to insert the public key into an instance
     # Abort on prompt is set, so catch the SystemExit exception and sleep for a while.
@@ -167,7 +162,7 @@ def fabric_confirm_ssh_key(host_string, key_file):
             except SystemExit:
                 time.sleep(10)
         else:
-            raise RuntimeError('Unable to SSH into ' + host_string + ' using ' + key_file)
+            run('whoami')
 
 
 def add_external_fact(host_string, key_file, facts):
@@ -179,6 +174,8 @@ def add_external_fact(host_string, key_file, facts):
     :param key_file: the absolute or relative path to the ssh key to use
     :param facts: a dictionary of facts; each key is a Puppet fact. The key
     names must follow the Puppet fact name rules.
+
+    :raise SystemExit: if adding the external fact fails
     """
     with settings(host_string=host_string, key_file=key_file):
         fabric_confirm_ssh_key(host_string, key_file)
@@ -213,7 +210,8 @@ def configure_server(host_string, key_file, repository, puppet_manifest, server_
     :param server_hostname: The hostname to set on the server
     :type  server_hostname: str
 
-
+    :raise SystemExit: if the server could not be successfully configured. This could be
+    for any number of reasons. Currently fabric is set to be quite verbose, so see its output
     """
     with settings(host_string=host_string, key_file=key_file):
         # Confirm the server is available
@@ -232,6 +230,7 @@ def configure_server(host_string, key_file, repository, puppet_manifest, server_
 
         # Apply the manifest to the server
         apply_puppet(host_string, key_file, puppet_manifest)
+        fabric_network.disconnect_all()
 
 
 def configure_consumer(host_string, key_file, repository, puppet_manifest, server_ip,
@@ -257,6 +256,9 @@ def configure_consumer(host_string, key_file, repository, puppet_manifest, serve
     :type  server_hostname:     str
     :param consumer_hostname:   The hostname to set on this consumer
     :type  consumer_hostname:   str
+
+    :raise SystemExit: if the consumer could not be successfully configured. This could be
+    for any number of reasons. Currently fabric is set to be quite verbose, so see its output
     """
     with settings(host_string=host_string, key_file=key_file):
         fabric_confirm_ssh_key(host_string, key_file)
@@ -281,6 +283,7 @@ def configure_consumer(host_string, key_file, repository, puppet_manifest, serve
         # Apply the puppet module and write the /etc/hosts file
         apply_puppet(host_string, key_file, puppet_manifest)
         run(HOSTS_TEMPLATE % {'ip': server_ip, 'hostname': server_hostname})
+        fabric_network.disconnect_all()
 
 
 def configure_tester(host_string, server_ip, server_hostname, consumer_ip, consumer_hostname,
@@ -303,6 +306,9 @@ def configure_tester(host_string, server_ip, server_hostname, consumer_ip, consu
     :type  os_name:             str
     :param os_version:          The version of the operating system.
     :type  os_version:          str
+
+    :raise SystemExit: if the tester could not be successfully configured. This could be
+    for any number of reasons. Currently fabric is set to be quite verbose, so see its output.
     """
     with settings(host_string=host_string, key_file=ssh_key):
         # Install necessary dependencies.
@@ -355,3 +361,4 @@ def configure_tester(host_string, server_ip, server_hostname, consumer_ip, consu
         put('inventory.yml', '~/pulp-automation/inventory.yml')
         os.remove('inventory.yml')
         os.remove('template_inventory.yml')
+        fabric_network.disconnect_all()
