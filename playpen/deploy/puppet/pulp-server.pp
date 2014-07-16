@@ -5,9 +5,6 @@
 class pulp_server {
     include stdlib
 
-    augeas { "yum.conf":
-        changes => "set /files/etc/yum.conf/main/http_caching packages"
-    } ->
     service { 'iptables':
         enable => false,
         ensure => 'stopped'

@@ -38,6 +38,7 @@ glance, keystone, nova = os1_utils.authenticate()
 pulp_images = os1_utils.get_pulp_images(nova)
 for image in pulp_images:
     # Boot, update, apply puppet module, reboot, snapshot, delete instances, apply metadata, remove old image
+    # TODO remove logs
     instance = os1_utils.create_instance(nova, image, image.name, os1_utils.DEFAULT_SEC_GROUP,
                                          os1_utils.DEFAULT_FLAVOR, arguments.key_name)
 

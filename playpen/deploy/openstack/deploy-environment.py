@@ -6,13 +6,14 @@ import sys
 import time
 
 from fabric.api import get, run, settings
+import signal
 
 import os1_utils
 import setup_utils
 
 
-# The distribution to use for the automated tests. Must be have Python 2.7
-TESTER_DISTRIBUTION = 'el7'
+# The distribution to use for the automated tests.
+TESTER_DISTRIBUTION = 'fc20'
 
 # Setup the CLI
 description = 'Deploy a Pulp test environment'
@@ -46,6 +47,13 @@ parser.add_argument('--tester-hostname', default='pulp-tester', help=tester_host
 parser.add_argument('--setup-only', action='store_true', help='setup, but do not run any tests')
 parser.add_argument('--no-teardown', action='store_true', help='setup and run the tests, but leave the VMs')
 args = parser.parse_args()
+
+
+def sigterm_handler(signal_number, stack_frame):
+    print 'Received SIGTERM; Exiting...'
+    sys.exit(1)
+
+signal.signal(signal.SIGTERM, sigterm_handler)
 
 
 # Validate that all the expected files actually exist
