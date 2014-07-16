@@ -10,7 +10,7 @@ from novaclient.v1_1 import client as nova_client
 OPENSTACK_ACTIVE_KEYWORD = 'ACTIVE'
 OPENSTACK_BUILD_KEYWORD = 'BUILD'
 DEFAULT_FLAVOR = 'm1.medium'
-DEFAULT_SEC_GROUP = 'jcline-pulp'
+DEFAULT_SEC_GROUP = 'pulp'
 META_USER_KEYWORD = 'user'
 META_DISTRIBUTION_KEYWORD = 'pulp_distribution'
 META_OS_NAME_KEYWORD = 'os_name'
@@ -79,7 +79,8 @@ def get_pulp_images(nova):
     return pulp_images
 
 
-def create_instance(nova, image_id, instance_name, security_groups, flavor_name, key_name, metadata=None):
+def create_instance(nova, image_id, instance_name, security_groups, flavor_name, key_name, metadata=None,
+                    cloud_init=None):
     """
     Builds an instance using the given nova client. This call will block until Openstack says the
     instance is 'active'. Note: this just means Openstack has successfully started the boot process.
@@ -102,6 +103,8 @@ def create_instance(nova, image_id, instance_name, security_groups, flavor_name,
     :type  key_name:        str
     :param metadata:        A dictionary to attach to the running instance. Maximum of entries.
     :type  metadata:        dict
+    :param cloud_init:      the absolute path to a cloud-config file
+    :type  cloud_init:      str
 
     :return: The instance
     :rtype:  nova.servers.Server
@@ -111,8 +114,14 @@ def create_instance(nova, image_id, instance_name, security_groups, flavor_name,
     if not isinstance(security_groups, list):
         security_groups = [security_groups]
 
+    init_file = None
+    if cloud_init:
+        init_file = open(cloud_init)
+
     server = nova.servers.create(instance_name, image_id, flavor, security_groups=security_groups,
-                                 key_name=key_name, meta=metadata)
+                                 key_name=key_name, userdata=init_file, meta=metadata)
+    if init_file:
+        init_file.close()
 
     # Hang out until Openstack says the VM is up or we give up
     for x in range(0, 600, 10):

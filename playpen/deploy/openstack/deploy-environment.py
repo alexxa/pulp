@@ -2,11 +2,11 @@
 
 import argparse
 import os
+import signal
 import sys
 import time
 
 from fabric.api import get, run, settings
-import signal
 
 import os1_utils
 import setup_utils
@@ -36,6 +36,7 @@ parser.add_argument('--security-group', default=os1_utils.DEFAULT_SEC_GROUP, hel
 parser.add_argument('--flavor', default=os1_utils.DEFAULT_FLAVOR, help='instance flavor to use')
 parser.add_argument('--repository', default='http://satellite6.lab.eng.rdu2.redhat.com/pulp/testing/2.4/latest',
                     help='the repository install Pulp from')
+parser.add_argument('--cloud-init', help='absolute path to a cloud-config file')
 parser.add_argument('--os1-username', help=os1_username_help)
 parser.add_argument('--os1-password', help=os1_password_help)
 parser.add_argument('--os1-tenant-id', help=os1_tenant_id_help)
@@ -101,13 +102,13 @@ try:
         'build_time': build_time,
     }
     pulp_server = os1_utils.create_instance(nova_instance, pulp_image, args.server_hostname,
-                                            args.security_group, args.flavor, args.os1_key, metadata)
+                                            args.security_group, args.flavor, args.os1_key, metadata, args.cloud_init)
     instances.append(pulp_server)
     pulp_consumer = os1_utils.create_instance(nova_instance, pulp_image.id, args.consumer_hostname,
-                                              args.security_group, args.flavor, args.os1_key, metadata)
+                                              args.security_group, args.flavor, args.os1_key, metadata, args.cloud_init)
     instances.append(pulp_consumer)
     pulp_tester = os1_utils.create_instance(nova_instance, test_suite_image.id, args.tester_hostname,
-                                            args.security_group, args.flavor, args.os1_key, metadata)
+                                            args.security_group, args.flavor, args.os1_key, metadata, args.cloud_init)
     instances.append(pulp_tester)
 
     # Get hostname information for Fabric
@@ -129,9 +130,9 @@ try:
     result = None
     if not args.setup_only:
         with settings(host_string=tester_host_string, key_file=args.key_file):
-            result = run('cd pulp-automation && nosetests -vs --with-xunit --logging-filter=-qpid,-pulp_auto',
+            result = run('cd pulp-automation && nosetests -vs --with-xunit --nologcapture',
                          warn_only=True)
-            get('pulp-automation/nosetests.xml')
+            get('pulp-automation/nosetests.xml', 'pulp_tests.xml')
     if result:
         sys.exit(result.return_code)
     else:
