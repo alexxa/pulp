@@ -6,7 +6,7 @@ import signal
 import sys
 import time
 
-from fabric.api import get, run, settings
+from fabric.api import get, run, local, settings
 
 import os1_utils
 import setup_utils
@@ -132,7 +132,9 @@ try:
         with settings(host_string=tester_host_string, key_file=args.key_file):
             result = run('cd pulp-automation && nosetests -vs --with-xunit --nologcapture',
                          warn_only=True)
-            get('pulp-automation/nosetests.xml', 'pulp_tests.xml')
+            # Get the results, which places them by default in a directory called *host string*
+            get('pulp-automation/nosetests.xml')
+            local('mv ' + tester_host_string + ' ' + args.distribution)
     if result:
         sys.exit(result.return_code)
     else:

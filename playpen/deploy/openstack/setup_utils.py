@@ -72,7 +72,7 @@ def yum_install(host_string, key_file, package_list):
     if isinstance(package_list, str):
         package_list = [package_list]
 
-    with settings(hide('output'), host_string=host_string, key_file=key_file):
+    with settings(hide('stdout'), host_string=host_string, key_file=key_file):
         for package in package_list:
             run(YUM_INSTALL_TEMPLATE % package)
     fabric_network.disconnect_all()
@@ -89,7 +89,7 @@ def yum_update(host_string, key_file):
 
     :raise SystemExit: if the YUM_UPDATE_COMMAND fails
     """
-    with settings(hide('output'), host_string=host_string, key_file=key_file):
+    with settings(hide('stdout'), host_string=host_string, key_file=key_file):
         run(YUM_UPDATE_COMMAND)
 
 
