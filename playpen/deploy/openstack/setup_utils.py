@@ -43,6 +43,10 @@ PULP_AUTO_DEPS = [
     'python-qpid'
 ]
 
+# Puppet fact names
+PULP_SERVER_CA_FACT = 'pulp_server_ca_cert'
+PULP_REPO_FACT = 'pulp_repo'
+
 # Configuration commands
 AUTHORIZE_ROOT_SSH = 'sudo cp ~/.ssh/authorized_keys /root/.ssh/authorized_keys'
 TEMPORARY_MANIFEST_LOCATION = '/tmp/manifest.pp'
@@ -57,43 +61,6 @@ INSTALL_TEST_SUITE = 'git clone https://github.com/RedHatQE/pulp-automation.git 
 && sudo python ./setup.py install'
 
 HOSTS_TEMPLATE = "echo '%(ip)s    %(hostname)s %(hostname)s.novalocal' | sudo tee -a /etc/hosts"
-
-
-def yum_install(host_string, key_file, package_list):
-    """
-    Install one or more packages on a host using yum
-
-    :param host_string:     The host to connect to: in the form 'user@host'
-    :type  host_string:     str
-    :param key_file:        The absolute path to the private key to use when connecting as 'user'
-    :type  key_file:        str
-    :param package_list:    The name or names of the package to install
-    :type  package_list:    list
-
-    :raise RuntimeError: if a package cannot be installed
-    """
-    if isinstance(package_list, str):
-        package_list = [package_list]
-
-    with settings(hide('stdout'), host_string=host_string, key_file=key_file):
-        for package in package_list:
-            run(YUM_INSTALL_TEMPLATE % package)
-    fabric_network.disconnect_all()
-
-
-def yum_update(host_string, key_file):
-    """
-    Update the system.
-
-    :param host_string:     The host to connect to: in the form 'user@host'
-    :type  host_string:     str
-    :param key_file:        The absolute path to the private key to use when connecting as 'user'
-    :type  key_file:        str
-
-    :raise SystemExit: if the YUM_UPDATE_COMMAND fails
-    """
-    with settings(hide('stdout'), host_string=host_string, key_file=key_file):
-        run(YUM_UPDATE_COMMAND)
 
 
 def apply_puppet(host_string, key_file, local_module, remote_location=TEMPORARY_MANIFEST_LOCATION):
@@ -116,32 +83,6 @@ def apply_puppet(host_string, key_file, local_module, remote_location=TEMPORARY_
     fabric_network.disconnect_all()
 
 
-def install_puppet_modules(host_string, key_file, module_list, force=True):
-    """
-    Install a puppet module on a remote host
-
-    :param host_string:     The host to connect to: in the form 'user@host'
-    :type  host_string:     str
-    :param key_file:        The absolute path to the private key to use when connecting as 'user'
-    :type  key_file:        str
-    :param module_list: the list of the modules on puppet forge: for example, ['puppetlabs-stdlib']
-    :type  module_list: list
-    :param force:       If true, install will use the force flag, which will cause puppet to
-    reinstall modules. If this is not used and the module is already installed, puppet will
-    not return 0.
-    :type  force: bool
-
-    :raise SystemExit: if installing a puppet module fails
-    """
-    with settings(hide('output'), host_string=host_string, key_file=key_file):
-        for module in module_list:
-            if force:
-                run('sudo puppet module install --force ' + module)
-            else:
-                run('sudo puppet module install ' + module)
-        fabric_network.disconnect_all()
-
-
 def fabric_confirm_ssh_key(host_string, key_file):
     """
     This is a utility to make sure fabric can ssh into the host with the given key. This is useful
@@ -157,6 +98,7 @@ def fabric_confirm_ssh_key(host_string, key_file):
     """
     # It can take some time for the init scripts to insert the public key into an instance
     # Abort on prompt is set, so catch the SystemExit exception and sleep for a while.
+    print 'Waiting for ' + host_string + ' to become accessible via ssh...'
     with settings(hide('everything'), host_string=host_string, key_file=key_file, quiet=True):
         for x in xrange(0, 30):
             try:
@@ -196,7 +138,7 @@ def add_external_fact(host_string, key_file, facts):
         os.remove(path)
 
 
-def configure_server(host_string, key_file, repository, puppet_manifest, server_hostname):
+def configure_pulp_server(host_string, key_file, repository, puppet_manifest, server_hostname, server_ca=None):
     """
     Set up a Pulp server using Fabric and a puppet module. Fabric will apply the given
     host name, ensure puppet and any modules declared in PUPPET_MODULES are installed,
@@ -206,12 +148,17 @@ def configure_server(host_string, key_file, repository, puppet_manifest, server_
     :type  host_string:     str
     :param key_file:        The path to the private key to use when logging into the server.
     :type  key_file:        str
-    :param repository:      The path to the repository to install from
+    :param repository:      The path to the repository to install from. This will be placed on
+    the server as a puppet external fact with the name specified in the the constant PULP_REPO_FACT
     :type  repository:      str
     :param puppet_manifest: The absolute path to the puppet manifest to apply on the server
     :type  puppet_manifest: str
     :param server_hostname: The hostname to set on the server
     :type  server_hostname: str
+    :param server_ca:       The server's parent CA cert. This is only necessary if the server
+    you are configuring is a node. This CA cert will be placed on the server as a puppet
+    external fact with the name in the constant PULP_SERVER_CA_FACT
+    :type  server_ca:       str
 
     :return: A string containing the Pulp server's CA cert. See Pulp installation docs for information
     on how to install this
@@ -232,7 +179,10 @@ def configure_server(host_string, key_file, repository, puppet_manifest, server_
             run(PUPPET_MODULE_INSTALL % module)
 
         # Add external facts to the server
-        puppet_external_facts = {'pulp_repo': repository}
+        puppet_external_facts = {
+            PULP_REPO_FACT: repository,
+            PULP_SERVER_CA_FACT: server_ca
+        }
         add_external_fact(host_string, key_file, puppet_external_facts)
 
         # Apply the manifest to the server
@@ -329,8 +279,9 @@ def configure_tester(host_string, server_ip, server_hostname, consumer_ip, consu
     """
     with settings(host_string=host_string, key_file=ssh_key):
         # Install necessary dependencies.
-        for dependency in PULP_AUTO_DEPS:
-            run(YUM_INSTALL_TEMPLATE % dependency)
+        with hide('stdout'):
+            for dependency in PULP_AUTO_DEPS:
+                run(YUM_INSTALL_TEMPLATE % dependency)
 
         # Install the test suite
         run(INSTALL_TEST_SUITE)

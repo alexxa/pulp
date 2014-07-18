@@ -58,6 +58,13 @@ def sigterm_handler(signal_number, stack_frame):
 signal.signal(signal.SIGTERM, sigterm_handler)
 
 
+# TODO: Change this to be very generic. Read some configuration files (like auth.json and instances.json)
+# and, for each instance, build it with the appropriate handler using the instance configuration settings.
+# A nice-to-have would be to do this in a semi-concurrent way that builds unrelated instances in parallel.
+# Any single setup should have a root server node and some number of children (either servers or consumers).
+# A good approach might be to build this root server first and work down the branches.
+
+
 # Validate that all the expected files actually exist
 if not os.path.isfile(args.key_file):
     raise ValueError(args.key_file + ' is not a file')
@@ -112,7 +119,7 @@ try:
                                             args.security_group, args.flavor, args.os1_key, metadata, args.cloud_init)
     instances.append(pulp_tester)
 
-    # Get hostname information for Fabric
+    # Get host string information for Fabric
     pulp_server_ip = os1_utils.get_instance_ip(pulp_server)
     server_host_string = pulp_image.metadata['user'] + '@' + pulp_server_ip
     pulp_consumer_ip = os1_utils.get_instance_ip(pulp_consumer)
