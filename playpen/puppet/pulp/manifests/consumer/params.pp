@@ -1,6 +1,11 @@
 
 class pulp::consumer::params inherits pulp::globals {
-    # Consumer default configuration settings
+    # The Pulp server CA cert default is expected to be an external fact
+    $pulp_server_ca_cert = $::pulp_server_ca_cert
+
+    # /etc/pulp/consumer/consumer.conf settings #
+    #############################################
+
     # Pulp server
     $pulp_server        = $fqdn
     $pulp_port          = 443

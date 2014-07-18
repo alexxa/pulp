@@ -7,6 +7,7 @@ import sys
 import time
 
 from fabric.api import get, run, local, settings
+from requests.exceptions import ConnectionError
 
 import os1_utils
 import setup_utils
@@ -119,10 +120,10 @@ try:
     tester_host_string = test_suite_image.metadata['user'] + '@' + os1_utils.get_instance_ip(pulp_tester)
 
     # Apply the necessary configuration to each instance
-    setup_utils.configure_server(server_host_string, args.key_file, args.repository,
-                                 args.server_puppet, args.server_hostname)
+    server_ca_cert = setup_utils.configure_server(server_host_string, args.key_file, args.repository,
+                                                  args.server_puppet, args.server_hostname)
     setup_utils.configure_consumer(consumer_host_string, args.key_file, args.repository, args.consumer_puppet,
-                                   pulp_server_ip, args.server_hostname, args.consumer_hostname)
+                                   pulp_server_ip, server_ca_cert, args.server_hostname, args.consumer_hostname)
     setup_utils.configure_tester(tester_host_string, pulp_server_ip, args.server_hostname, pulp_consumer_ip,
                                  args.consumer_hostname, args.key_file, os_name, os_version)
 
@@ -141,6 +142,15 @@ try:
         sys.exit(1)
 except RuntimeError as e:
     sys.stderr.write(e.message + '\n')
+    sys.exit(1)
+except ConnectionError as e:
+    sys.stderr.write(e.message + '\n')
+    # Authentication usually times out by the time this block is reached
+    os1_clients = os1_utils.authenticate(args.os1_username, args.os1_password, args.os1_tenant_id,
+                                         args.os1_tenant_name, args.os1_auth_url)
+    glance_instance, keystone_instance, nova_instance = os1_clients
+    for instance in instances:
+        nova_instance.servers.delete(instance)
     sys.exit(1)
 finally:
     # Make sure to delete all the instances

@@ -2,6 +2,7 @@
 
 import json
 import os
+import StringIO
 import tempfile
 import time
 import yaml
@@ -16,6 +17,8 @@ env.connection_attempts = 4
 env.timeout = 30
 env.disable_known_hosts = True
 env.abort_on_prompts = True
+
+SERVER_CA_CERT_LOCATION = '/etc/pki/pulp/ca.crt'
 
 # Constants for pulp-automation YAML configuration
 CONSUMER_YAML_KEY = 'consumers'
@@ -210,6 +213,10 @@ def configure_server(host_string, key_file, repository, puppet_manifest, server_
     :param server_hostname: The hostname to set on the server
     :type  server_hostname: str
 
+    :return: A string containing the Pulp server's CA cert. See Pulp installation docs for information
+    on how to install this
+    :rtype:  str
+
     :raise SystemExit: if the server could not be successfully configured. This could be
     for any number of reasons. Currently fabric is set to be quite verbose, so see its output
     """
@@ -230,10 +237,19 @@ def configure_server(host_string, key_file, repository, puppet_manifest, server_
 
         # Apply the manifest to the server
         apply_puppet(host_string, key_file, puppet_manifest)
+
+        # Retrieve the server's CA cert for use with clients
+        temporary_file = StringIO.StringIO()
+        run('sudo cp ' + SERVER_CA_CERT_LOCATION + ' ~/ca.crt && sudo chmod 0777 ~/ca.crt')
+        get('~/ca.crt', temporary_file)
+        server_ca_cert = temporary_file.getvalue()
+        temporary_file.close()
+
         fabric_network.disconnect_all()
+        return server_ca_cert
 
 
-def configure_consumer(host_string, key_file, repository, puppet_manifest, server_ip,
+def configure_consumer(host_string, key_file, repository, puppet_manifest, server_ip, server_ca_cert,
                        server_hostname, consumer_hostname):
     """
     Set up a Pulp consumer using Fabric and a puppet module. Fabric will apply the given consumer
@@ -276,7 +292,8 @@ def configure_consumer(host_string, key_file, repository, puppet_manifest, serve
         # Add external facts to the consumer so it can find the server
         puppet_external_facts = {
             'external_pulp_server': server_hostname,
-            'pulp_repo': repository
+            'pulp_repo': repository,
+            'pulp_server_ca_cert': server_ca_cert,
         }
         add_external_fact(host_string, key_file, puppet_external_facts)
 

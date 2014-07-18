@@ -73,6 +73,9 @@ class pulp::server::params inherits pulp::globals {
     $enable_celerybeat          = true
     $enable_resource_manager    = true
 
+    # Apache configuration settings
+    $wsgi_processes = undef
+
     # Sort out firewall, nss
     if $::operatingsystem == 'RedHat' and $::lsbmajdistrelease == '5' {
         fail("Pulp servers are not supported on RHEL5.")

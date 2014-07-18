@@ -3,6 +3,7 @@
 # the README.md
 
 class pulp::consumer (
+    $pulp_server_ca_cert        = $pulp::consumer::params::pulp_server_ca_cert,
     $pulp_server                = $pulp::consumer::params::pulp_server,
     $pulp_port                  = $pulp::consumer::params::pulp_port,
     $pulp_api_prefix            = $pulp::consumer::params::pulp_api_prefix,

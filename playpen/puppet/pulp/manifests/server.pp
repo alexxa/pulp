@@ -50,6 +50,7 @@ class pulp::server (
     $email_enabled                      = $pulp::server::params::email_enabled,
     $enable_celerybeat                  = $pulp::server::params::enable_celerybeat,
     $enable_resource_manager            = $pulp::server::params::enable_resource_manager,
+    $wsgi_processes                     = $pulp::server::params::wsgi_processes,
 ) inherits pulp::server::params {
     # Install, configure, and start the necessary services
     anchor { 'pulp::server::start': }->

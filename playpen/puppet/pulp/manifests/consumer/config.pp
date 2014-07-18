@@ -1,6 +1,12 @@
 # This is a private class and should be be called directly. Use pulp::consumer instead
 
 class pulp::consumer::config {
+    # The Pulp server CA cert
+    $pulp_server_ca_cert = $pulp::consumer::pulp_server_ca_cert
+
+    # /etc/pulp/consumer/consumer.conf settings #
+    #############################################
+
     # Server
     $pulp_server        = $pulp::consumer::pulp_server
     $pulp_port          = $pulp::consumer::pulp_port
@@ -48,12 +54,23 @@ class pulp::consumer::config {
     # Profile
     $profile_minutes = $pulp::consumer::profile_minutes
 
-
     # Write consumer.conf file
     file { '/etc/pulp/consumer/consumer.conf':
         content => template('pulp/consumer.conf.erb'),
         owner   => 'root',
         group   => 'root',
         mode    => '0644'
+    }
+
+    # Add the Pulp server's CA cert to the system trusted CA certs
+    file { '/etc/pki/tls/certs/pulp.crt':
+        content => $pulp_server_ca_cert,
+        owner   => 'root',
+        group   => 'root',
+        mode    => '0644'
+    } -> exec { "Move cert":
+        path    => "/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/bin:/sbin",
+        # TODO Make sure we're not overwriting a cert (which would be quite bad)
+        command => "mv /etc/pki/tls/certs/pulp.crt /etc/pki/tls/certs/`openssl x509 -noout -hash -in /etc/pki/tls/certs/pulp.crt`.0"
     }
 }

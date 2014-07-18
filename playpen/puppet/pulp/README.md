@@ -45,7 +45,7 @@ do the following:
 
 ```
 class {'::pulp::server':
-   default_login    => 'jcline'
+   default_login    => 'jcline',
    default_password => 'hunter2'
 }
 ```
@@ -136,6 +136,9 @@ for more information. Options are `true` or `false`. The default is `true`.
 This setting can be used to enable the `pulp_resource_manager` service on this server.
 See the server [installation documents](https://pulp-user-guide.readthedocs.org/en/latest/installation.html#server)
 for more information. Options are `true` or `false`. The default is `true`.
+
+####`wsgi_processes`
+This setting can be used to change the number of WSGI processes Pulp uses. The default is 3.
 
 ####`db_name`
 This setting corresponds to the [database] `name` field.
@@ -274,10 +277,15 @@ This setting corresponds to the [email] `enabled` field.
 
 ####Class: pulp::consumer
 
-All of the parameters manipulate the /etc/pulp/consumer/consumer.conf file.
+Most of the parameters manipulate the /etc/pulp/consumer/consumer.conf file.
 
 For more details about the configuration parameters, take a look at the default
 configuration file, which is documented in-line.
+
+####`pulp_server_ca_cert`
+This should be the Pulp server's CA certificate. It can be passed in here, or
+set as an external fact on the Pulp consumer. For more information, see 
+[consumer client installation](https://pulp-user-guide.readthedocs.org/en/latest/installation.html#consumer-client-and-agent)
 
 ####`pulp_server`
 This setting corresponds to the [server] `host` field.
