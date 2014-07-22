@@ -35,10 +35,10 @@ class pulp::consumer (
     $consumer_profile_minutes   = $pulp::consumer::params::consumer_profile_minutes,
 ) inherits pulp::consumer::params {
     # Install, configure, and start the necessary services
-    anchor { 'pulp::consumer::start': }->
-    class { 'pulp::consumer::install': }->
-    class { 'pulp::consumer::config': }->
-    class { 'pulp::consumer::service': }->
+    anchor { 'pulp::consumer::start': } ->
+    class { 'pulp::consumer::install': } ->
+    class { 'pulp::consumer::config': } ->
+    class { 'pulp::consumer::service': } ->
     anchor { 'pulp::consumer::end': }
 }
 

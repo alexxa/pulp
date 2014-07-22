@@ -1,13 +1,16 @@
+# This is a private class that sets the default values for
+# the Pulp consumer parameters.
 
 class pulp::consumer::params inherits pulp::globals {
-    # The Pulp server CA cert default is expected to be an external fact
+    # The Pulp server CA cert checks the global scope
+    # for a fact by default
     $pulp_server_ca_cert = $::pulp_server_ca_cert
 
     # /etc/pulp/consumer/consumer.conf settings #
     #############################################
 
     # Pulp server
-    $pulp_server        = $fqdn
+    $pulp_server        = $::pulp_server
     $pulp_port          = 443
     $pulp_api_prefix    = "/pulp/api"
     $pulp_rsa_pub       = "/etc/pki/pulp/consumer/server/rsa_pub.key"
@@ -44,11 +47,7 @@ class pulp::consumer::params inherits pulp::globals {
 
     # Messaging
     $msg_scheme        = "tcp"
-    if $external_msg_host {
-        $msg_host = $external_msg_host
-    } else {
-        $msg_host = undef
-    }
+    $msg_host          = $::msg_host
     $msg_port          = 5672
     $msg_transport     = "qpid"
     $msg_cacert        = undef
