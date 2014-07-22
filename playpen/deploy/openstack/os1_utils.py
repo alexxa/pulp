@@ -99,6 +99,8 @@ class OS1Manager:
         :return: The instance
         :rtype:  nova.servers.Server
         """
+        print 'Building [%s]...' % instance_name
+
         # Set up instance configuration
         self._authenticate()
         flavor = self.nova.flavors.find(name=flavor_name)
@@ -114,19 +116,41 @@ class OS1Manager:
         if init_file:
             init_file.close()
 
-        # Hang out until Openstack says the VM is up or we give up
-        for x in range(0, 600, 10):
-            if server.status == OPENSTACK_BUILD_KEYWORD:
-                time.sleep(10)
-                server = self.nova.servers.get(server.id)
-            else:
-                break
-
-        if server.status != OPENSTACK_ACTIVE_KEYWORD:
-            server.delete()
-            raise RuntimeError('Aborting - failed to build the following instance: ' + instance_name)
-
         return server
+
+    def wait_for_active_instances(self, instance_list, timeout=10):
+        """
+        Wait for the given list of instances to become active. Raise an exception if any fail.
+        It is the responsibility of the user to tear down the instances.
+
+        :param instance_list:   List of instances to wait on
+        :type  instance_list:   list of novaclient.v1_1.servers.Server
+        :param timeout:         maximum time to wait in minutes
+        :type  timeout:         int
+
+        :raise: RuntimeError if not all the instances are in the active state by the timeout
+        """
+        # Wait until all the instances are built or times out
+        for x in range(0, timeout * 60, 10):
+            # Check to make sure each instance is out of the build state
+            for server in instance_list:
+                # Get the latest information about the image
+                server = self.nova.servers.get(server.id)
+
+                # An instance isn't done building yet
+                if server.status == OPENSTACK_BUILD_KEYWORD:
+                    time.sleep(10)
+                    break
+            else:
+                # In this case every server was finished building
+                for server in instance_list:
+                    server = self.nova.servers.get(server.id)
+                    if server.status != OPENSTACK_ACTIVE_KEYWORD:
+                        raise RuntimeError('Failed to build the following instance: ' + server.name)
+                break
+        else:
+            # In this case we never built all the instances
+            raise RuntimeError('Build time exceeded timeout, please inspect the instances and clean up')
 
     def create_image(self, image_location):
         """
@@ -151,6 +175,16 @@ class OS1Manager:
             new_image.update(data=image_data)
 
         return new_image
+
+    def delete_instance(self, instance):
+        """
+        Remove the specified instances
+
+        :param instance: An instance on OS1 to delete
+        :type  instance: novaclient.v1_1.servers.Server
+        """
+        self._authenticate()
+        self.nova.servers.delete(instance)
 
     def take_snapshot(self, server, snapshot_name, metadata=None):
         """
@@ -213,3 +247,29 @@ class OS1Manager:
                 break
         else:
             raise RuntimeError('Reboot is hanging. Please fix it manually.')
+
+    def get_distribution_image(self, distribution):
+        """
+        Retrieve an image of the given distribution. This method looks for images tagged
+        with the META_DISTRIBUTION_KEYWORD and matched the given string to that value.
+        If more than one image exists for the given distribution, the first in the list
+        is returned.
+
+        :param distribution: The image distribution to return. 'el6', 'fc20', etc.
+        :type  distribution: str
+
+        :return: An image that can be used to create an instance
+        :rtype:  novaclient.v1_1.images.Image
+
+        :raise: ValueError if the distribution doesn't exist
+        """
+        # Find the image to build
+        pulp_image = None
+        for image in self.get_pulp_images():
+            if image.metadata[META_DISTRIBUTION_KEYWORD] == distribution:
+                pulp_image = image
+                break
+        if not pulp_image:
+            raise ValueError('Distribution [%s] does not exist' % distribution)
+
+        return pulp_image

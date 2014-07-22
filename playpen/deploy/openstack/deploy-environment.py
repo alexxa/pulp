@@ -1,13 +1,11 @@
 #!/usr/bin/python
 
 import argparse
-import os
-import signal
-import sys
 import time
 
-from fabric.api import get, run, local, settings
-from requests.exceptions import ConnectionError
+from fabric.api import get, run, settings
+import sys
+import yaml
 
 import os1_utils
 import setup_utils
@@ -17,7 +15,7 @@ import setup_utils
 TESTER_DISTRIBUTION = 'fc20'
 
 # Setup the CLI
-description = 'Deploy a Pulp test environment'
+description = 'Deploy a Pulp environment, and optionally run the integration suite against it'
 consumer_hostname_help = 'The hostname to give the consumer; default is pulp-consumer'
 server_hostname_help = 'The hostname to give the server; default is pulp-server'
 tester_hostname_help = 'The hostname to give the tester; default is pulp-tester'
@@ -28,35 +26,11 @@ os1_tenant_name_help = 'tenant name on OS1; this is not necessary if using OS_TE
 os1_auth_url_help = 'authentication URL on OS1; this is not necessary if using OS_AUTH_URL environment variable'
 
 parser = argparse.ArgumentParser(description=description)
-parser.add_argument('--distribution', help="OS to test on; fc20, el6, etc.", required=True)
-parser.add_argument('--key-file', help='absolute path to the private key of the OS1 key pair', required=True)
-parser.add_argument('--os1-key', help='the name of the key pair in OS1 to use', required=True)
-parser.add_argument('--consumer-puppet', help='absolute path to the consumer puppet module', required=True)
-parser.add_argument('--server-puppet', help='absolute path to the server puppet module', required=True)
-parser.add_argument('--security-group', default=os1_utils.DEFAULT_SEC_GROUP, help='security group name to apply in OS1')
-parser.add_argument('--flavor', default=os1_utils.DEFAULT_FLAVOR, help='instance flavor to use')
-parser.add_argument('--repository', default='http://satellite6.lab.eng.rdu2.redhat.com/pulp/testing/2.4/latest',
-                    help='the repository install Pulp from')
-parser.add_argument('--cloud-init', help='absolute path to a cloud-config file')
-parser.add_argument('--os1-username', help=os1_username_help)
-parser.add_argument('--os1-password', help=os1_password_help)
-parser.add_argument('--os1-tenant-id', help=os1_tenant_id_help)
-parser.add_argument('--os1-tenant-name', help=os1_tenant_name_help)
-parser.add_argument('--os1-auth-url', help=os1_auth_url_help)
-parser.add_argument('--consumer-hostname', default='pulp-consumer', help=consumer_hostname_help)
-parser.add_argument('--server-hostname', default='pulp-server', help=server_hostname_help)
-parser.add_argument('--tester-hostname', default='pulp-tester', help=tester_hostname_help)
+parser.add_argument('--config', help='Path to the configuration file to use to deploy the environment', required=True)
+parser.add_argument('--integration-tests', action='store_true', help='Run the integration tests')
 parser.add_argument('--setup-only', action='store_true', help='setup, but do not run any tests')
 parser.add_argument('--no-teardown', action='store_true', help='setup and run the tests, but leave the VMs')
 args = parser.parse_args()
-
-
-def sigterm_handler(signal_number, stack_frame):
-    print 'Received SIGTERM; Exiting...'
-    sys.exit(1)
-
-signal.signal(signal.SIGTERM, sigterm_handler)
-
 
 # TODO: Change this to be very generic. Read some configuration files (like auth.json and instances.json)
 # and, for each instance, build it with the appropriate handler using the instance configuration settings.
@@ -64,107 +38,212 @@ signal.signal(signal.SIGTERM, sigterm_handler)
 # Any single setup should have a root server node and some number of children (either servers or consumers).
 # A good approach might be to build this root server first and work down the branches.
 
+# This maps roles to setup functions
+CONFIGURATION_FUNCTIONS = {
+    'server': setup_utils.configure_pulp_server,
+    'consumer': setup_utils.configure_consumer,
+    'tester': setup_utils.configure_tester
+}
 
-# Validate that all the expected files actually exist
-if not os.path.isfile(args.key_file):
-    raise ValueError(args.key_file + ' is not a file')
-if not os.path.isfile(args.consumer_puppet):
-    raise ValueError(args.consumer_puppet + ' is not a file')
-if not os.path.isfile(args.server_puppet):
-    raise ValueError(args.server_puppet + ' is not a file')
 
-# Authenticate with OS1
-os1_clients = os1_utils.authenticate(args.os1_username, args.os1_password, args.os1_tenant_id,
-                                     args.os1_tenant_name, args.os1_auth_url)
-glance_instance, keystone_instance, nova_instance = os1_clients
+def build_instances(os1_manager, instance_config_list, metadata=None):
+    """
+    Build a set of instances on Openstack using the given list of configurations.
+    Each configuration is expected to contain the following keywords: 'distribution',
+    'instance_name', 'security_group', 'flavor', 'os1_key', and 'cloud_config'
 
-# Find the image to build
-pulp_image = None
-for image in os1_utils.get_pulp_images(nova_instance):
-    if image.metadata[os1_utils.META_DISTRIBUTION_KEYWORD] == args.distribution:
-        pulp_image = image
-        break
-if not pulp_image:
-    raise ValueError('Distribution [%s] does not exist' % args.distribution)
+    The configurations will have the 'user' and 'host_string' keys added.
 
-# Get the image to use for the test suite
-test_suite_image = None
-for image in os1_utils.get_pulp_images(nova_instance):
-    if image.metadata[os1_utils.META_DISTRIBUTION_KEYWORD] == TESTER_DISTRIBUTION:
-        test_suite_image = image
-        break
-if not test_suite_image:
-    raise ValueError('Failed to find the image for the default test distribution')
+    :param os1_manager: An instance of os1_utils
+    :type  os1_manager: os1_utils.OS1Manager
+    :param instance_config_list:
+    :param metadata:
+    :return:
+    """
+    instance_list = []
 
-# Gather the OS name and version
-os_name = pulp_image.metadata['os_name']
-os_version = pulp_image.metadata['os_version']
+    try:
+        # Create all the build requests
+        for instance_config in instance_config_list:
+            image = os1_manager.get_distribution_image(instance_config['distribution'])
+            instance_name = instance_config['instance_name']
+            security_group = instance_config['security_group']
+            flavor = instance_config['flavor']
+            os1_key = instance_config['os1_key']
+            cloud_config = instance_config.get('cloud_config')
+            instance_config['user'] = image.metadata['user'].encode('ascii')
 
-# Keep track of the instances we make so we can tear them down if something goes wrong
-instances = []
-try:
-    # Build each instance
-    build_time = str(time.time())
-    metadata = {
-        'pulp_instance': 'True',
-        'build_time': build_time,
-    }
-    pulp_server = os1_utils.create_instance(nova_instance, pulp_image, args.server_hostname,
-                                            args.security_group, args.flavor, args.os1_key, metadata, args.cloud_init)
-    instances.append(pulp_server)
-    pulp_consumer = os1_utils.create_instance(nova_instance, pulp_image.id, args.consumer_hostname,
-                                              args.security_group, args.flavor, args.os1_key, metadata, args.cloud_init)
-    instances.append(pulp_consumer)
-    pulp_tester = os1_utils.create_instance(nova_instance, test_suite_image.id, args.tester_hostname,
-                                            args.security_group, args.flavor, args.os1_key, metadata, args.cloud_init)
-    instances.append(pulp_tester)
+            # Create the server and save its ip to the instance config
+            server = os1_manager.create_instance(image.id, instance_name, security_group, flavor, os1_key,
+                                                 metadata, cloud_config)
+            instance_list.append((server, instance_config))
 
-    # Get host string information for Fabric
-    pulp_server_ip = os1_utils.get_instance_ip(pulp_server)
-    server_host_string = pulp_image.metadata['user'] + '@' + pulp_server_ip
-    pulp_consumer_ip = os1_utils.get_instance_ip(pulp_consumer)
-    consumer_host_string = pulp_image.metadata['user'] + '@' + pulp_consumer_ip
-    tester_host_string = test_suite_image.metadata['user'] + '@' + os1_utils.get_instance_ip(pulp_tester)
+        # Wait until all the instances are built or 10 minutes elapse
+        os1_manager.wait_for_active_instances([server for server, conf in instance_list], timeout=10)
+    except:
+        # Clean up the instances because something exploded in Openstack (probably)
+        print 'Error while building instance: %s' % sys.exc_info()[1]
+        for instance, conf in instance_list:
+            os1_manager.delete_instance(instance)
 
-    # Apply the necessary configuration to each instance
-    server_ca_cert = setup_utils.configure_server(server_host_string, args.key_file, args.repository,
-                                                  args.server_puppet, args.server_hostname)
-    setup_utils.configure_consumer(consumer_host_string, args.key_file, args.repository, args.consumer_puppet,
-                                   pulp_server_ip, server_ca_cert, args.server_hostname, args.consumer_hostname)
-    setup_utils.configure_tester(tester_host_string, pulp_server_ip, args.server_hostname, pulp_consumer_ip,
-                                 args.consumer_hostname, args.key_file, os_name, os_version)
 
-    # Run the tests and get the results
-    result = None
-    if not args.setup_only:
-        with settings(host_string=tester_host_string, key_file=args.key_file):
-            result = run('cd pulp-automation && nosetests -vs --with-xunit --nologcapture',
-                         warn_only=True)
-            # Get the results, which places them by default in a directory called *host string*
-            get('pulp-automation/nosetests.xml')
-            local('mv ' + tester_host_string + ' ' + args.distribution)
-    if result:
-        sys.exit(result.return_code)
+    # Set the host string
+    for server, instance_config in instance_list:
+        instance_config['host_string'] = instance_config['user'] + '@' + os1_manager.get_instance_ip(server)
+
+    # Maybe don't need to return instance_config
+    return instance_list
+
+
+def configure_instance(instance_config):
+    """
+    Configure an instance using the function corresponding to the instance
+    configuration's 'role' value as defined in get_config_function.
+
+    :param instance_config: is the instance configuration to use. The
+    required keywords in this dictionary vary by role.
+    :type  instance_config: dict
+
+    :return: The result, if any, combined with the original instance config
+    :rtype:  dict
+    """
+    # Gather the necessary configuration arguments
+    config_function = CONFIGURATION_FUNCTIONS[instance_config['role']]
+    config_result = config_function(**instance_config)
+
+    # Add the instance configuration to the configuration results
+    if config_result is None:
+        config_result = {}
+    config_result = dict(config_result.items() + instance_config.items())
+    return config_result
+
+
+def parse_config_file(config_path):
+    """
+    Parse the given configuration file into a python dictionary
+
+    :param config_path: the absolute path to the configuration file
+    :type  config_path: str
+
+    :return: a tuple in the format:
+    (list of pulp configuration dicts, pulp tester dict, os1 credentials dict)
+    :rtype:  tuple
+
+    """
+    with open(config_path, 'r') as config_file:
+        config = yaml.load(config_file)
+        structure = config['structure']
+        pulp_tester = config['pulp_tester']
+        os1_credentials = config['os1_credentials']
+
+        # TODO add recursive support
+        instances = [structure.pop('instance')]
+        for instance in structure.pop('children'):
+            instances.append(instance)
+
+    return instances, pulp_tester, os1_credentials
+
+
+def deploy_instances(os1_manager, instance_config_list, metadata):
+    """
+    Deploy the given list of instances using the os1 manager instance.
+    Each Openstack instance will have the given metadata attached to it.
+
+    :param os1_manager:             The instance of the OS1 manager to use
+    :type  os1_manager:             os1_utils.OS1Manager
+    :param instance_config_list:    a list of dictionaries that contain configuration dictionaries
+    :type  instance_config_list:    list of dict
+    :param metadata:                A dictionary of metadata to attach to the instance
+    :type  metadata:                dict
+
+    :return: a tuple of servers and their final configurations
+    :rtype:  (list of novaclient.v1_1.servers.Server, list of dict)
+    """
+    # Step 1: Build all the instances, attach configuration to them
+    # Step 2: Configure each instance, configuring the root node first,
+    # and working down to the leaves.
+    servers = []
+    final_config_list = []
+
+    instances = build_instances(os1_manager, instance_config_list, metadata)
+
+    for instance, instance_config in instances:
+        if 'parent' in instance_config:
+            # Find the parent's post-build configuration
+            filter_function = lambda conf: conf['instance_name'] == instance_config['parent']
+            parent_config = filter(filter_function, final_config_list)
+            instance_config['parent_config'] = parent_config[0]
+
+        configured_instance = configure_instance(instance_config)
+
+        final_config_list.append(configured_instance)
+        servers.append(instance)
+
+    return servers, final_config_list
+
+
+def deploy_test_machine(os1_manager, instance_config, server_config, consumer_config, metadata=None):
+    """
+    Deploy the test machine, which does not fall into the pattern for deploying the other instances.
+    Currently, the automated tests only use one server and one consumer.
+
+    :param os1_manager:     The os1 manager to use when deploying the instance
+    :type  os1_manager:     os1_util.OS1Manager
+    :param instance_config: The configuration information for the test machine
+    :type  instance_config: dict
+    :param server_config:   The configuration information from the server
+    :type  server_config:   dict
+    :param consumer_config: the configuration information from the consumer
+    :type  consumer_config: dict
+    :param metadata:        The metadata to attach to the test machine
+    :type  metadata:        dict
+
+    :return: a tuple of the instance and its configuration
+    :rtype:  dict
+    """
+    instance_config['server_config'] = server_config
+    instance_config['consumer_config'] = consumer_config
+
+    instance, instance_config = build_instances(os1_manager, [instance_config], metadata=metadata)[0]
+    final_config = configure_instance(instance_config)
+    return instance, final_config
+
+
+# Parse the configuration file
+print 'Parsing configuration file...'
+instances_to_build, test_machine_config, os1_auth = parse_config_file(args.config)
+print 'Done!\n'
+os1 = os1_utils.OS1Manager(**os1_auth)
+print 'Successfully authenticated with OS1'
+
+# Deploy the non-test machine instances
+instance_metadata = {
+    'pulp_instance': 'True',
+    'build_time': str(time.time()),
+}
+print 'Deploying instances...'
+server_list, config_list = deploy_instances(os1, instances_to_build, instance_metadata)
+
+# Right now the integration tests expect a single server and a single consumer
+if args.integration_tests:
+    test_server_config = filter(lambda config: config['role'] == 'server', config_list)
+    test_consumer_config = filter(lambda config: config['role'] == 'consumer', config_list)
+
+    if len(test_server_config) == 1 and len(test_consumer_config) == 1:
+        test_server, test_config = deploy_test_machine(os1, test_machine_config, test_server_config[0],
+                                                       test_consumer_config[0], instance_metadata)
+        server_list.append(test_server)
+
+        # If the setup_only flag isn't specified, run the tests
+        if not args.setup_only:
+            with settings(host_string=test_config['host_string'], key_file=test_config['private_key']):
+                result = run('cd pulp-automation && nosetests -vs --with-xunit --nologcapture', warn_only=True)
+                # Get the results, which places them by default in a directory called *host string*
+                get('pulp-automation/nosetests.xml', test_config['tests_destination'])
+
     else:
-        sys.exit(1)
-except RuntimeError as e:
-    sys.stderr.write(e.message + '\n')
-    sys.exit(1)
-except ConnectionError as e:
-    sys.stderr.write(e.message + '\n')
-    # Authentication usually times out by the time this block is reached
-    os1_clients = os1_utils.authenticate(args.os1_username, args.os1_password, args.os1_tenant_id,
-                                         args.os1_tenant_name, args.os1_auth_url)
-    glance_instance, keystone_instance, nova_instance = os1_clients
-    for instance in instances:
-        nova_instance.servers.delete(instance)
-    sys.exit(1)
-finally:
-    # Make sure to delete all the instances
-    if not args.setup_only and not args.no_teardown:
-        # Authentication usually times out by the time this block is reached
-        os1_clients = os1_utils.authenticate(args.os1_username, args.os1_password, args.os1_tenant_id,
-                                             args.os1_tenant_name, args.os1_auth_url)
-        glance_instance, keystone_instance, nova_instance = os1_clients
-        for instance in instances:
-            nova_instance.servers.delete(instance)
+        print 'Skipping test machine; your configuration file does not specify a single server and consumer'
+
+if not args.no_teardown:
+    for deployed_instance in server_list:
+        os1.delete_instance(deployed_instance)

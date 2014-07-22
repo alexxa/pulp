@@ -1,0 +1,49 @@
+pulp_consumer1: &consumer
+        distribution: el7
+        instance_name: el7-pulp-consumer
+        security_group: pulp
+        flavor: m1.medium
+        os1_key: jcline-key
+        cloud_config: /home/jcline/devel/pulp/playpen/deploy/cloud-init/cloud-config.txt
+        parent: el7-pulp-server
+        private_key: /home/jcline/.ssh/id_rsa
+        role: consumer
+        repository: http://repos.fedorapeople.org/repos/pulp/pulp/beta/2.4
+        puppet_manifest: /home/jcline/devel/pulp/playpen/deploy/puppet/pulp-consumer.pp
+        hostname: pulp-consumer
+
+structure:
+    instance:
+        distribution: el7
+        instance_name: el7-pulp-server
+        security_group: pulp
+        flavor: m1.medium
+        os1_key: jcline-key
+        cloud_config: /home/jcline/devel/pulp/playpen/deploy/cloud-init/cloud-config.txt
+        private_key: /home/jcline/.ssh/id_rsa
+        role: server
+        repository: http://repos.fedorapeople.org/repos/pulp/pulp/beta/2.4
+        puppet_manifest: /home/jcline/devel/pulp/playpen/deploy/puppet/pulp-server.pp
+        hostname: pulp-server
+    children:
+        - *consumer
+
+pulp_tester:
+    distribution: fc20
+    instance_name: pulp-tester
+    hostname: pulp-tester
+    security_group: pulp
+    flavor: m1.medium
+    os1_key: jcline-key
+    private_key: /home/jcline/.ssh/id_rsa
+    role: tester
+    os_name: Fedora
+    os_version: 20
+    tests_destination: fc19/pulp_integration_tests.xml
+
+os1_credentials:
+    username: jcline
+    password: os1jcline
+    tenant_id: 36c97cbc23654c55a1dd4eb75417c783
+    tenant_name: ENG Virtualization R&amp;D
+    auth_url: http://10.3.0.3:5000/v2.0
