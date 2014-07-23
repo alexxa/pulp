@@ -320,7 +320,6 @@ try:
     # Right now the integration tests expect a single server and a single consumer
     if args.integration_tests:
         config_list = flatten_structure(instance_structure)
-        print repr(config_list)
         test_server_config = filter(lambda config: config['role'] == 'server', config_list)
         test_consumer_config = filter(lambda config: config['role'] == 'consumer', config_list)
 

@@ -9,4 +9,4 @@ set -x
 WORKSPACE="$(readlink -f $( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/../../../)"
 
 cd ${WORKSPACE}/pulp/playpen/deploy
-openstack/deploy-environment.py --integration-tests --config ${DISTRIBUTION}-config --repo ${PULP_REPOSITORY}
+openstack/deploy-environment.py --integration-tests --config ~/${DISTRIBUTION}-config --repo ${PULP_REPOSITORY}
