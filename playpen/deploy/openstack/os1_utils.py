@@ -224,7 +224,9 @@ class OS1Manager:
         :return: the public ip address
         :rtype:  str
         """
+        # Authenticate and ensure we have the latest information about the instance
         self._authenticate()
+        instance = self.nova.servers.get(instance.id)
         public_ip = instance.networks['os1-internal-1319'][1]
         return public_ip.encode('ascii')
 

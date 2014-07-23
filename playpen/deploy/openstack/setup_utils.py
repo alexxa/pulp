@@ -136,7 +136,7 @@ def add_external_fact(host_string, key_file, facts):
         os.remove(path)
 
 
-def configure_pulp_server(host_string, private_key, **kwargs):
+def configure_pulp_server(host_string=None, private_key=None, **kwargs):
     """
     Set up a Pulp server using Fabric and a puppet module. Fabric will apply the given
     host name, ensure puppet and any modules declared in PUPPET_MODULES are installed,

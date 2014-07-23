@@ -1,32 +1,30 @@
-pulp_consumer1: &consumer
-        distribution: el7
-        instance_name: el7-pulp-consumer
-        security_group: pulp
-        flavor: m1.medium
-        os1_key: jcline-key
-        cloud_config: /home/jcline/devel/pulp/playpen/deploy/cloud-init/cloud-config.txt
-        parent: el7-pulp-server
-        private_key: /home/jcline/.ssh/id_rsa
-        role: consumer
-        repository: http://repos.fedorapeople.org/repos/pulp/pulp/beta/2.4
-        puppet_manifest: /home/jcline/devel/pulp/playpen/deploy/puppet/pulp-consumer.pp
-        hostname: pulp-consumer
+pulp_consumer1: &consumer1
+    distribution: el7
+    instance_name: el7-pulp-consumer
+    security_group: pulp
+    flavor: m1.medium
+    os1_key: jcline-key
+    cloud_config: /home/jcline/devel/pulp/playpen/deploy/cloud-init/cloud-config.txt
+    private_key: /home/jcline/.ssh/id_rsa
+    role: consumer
+    repository: http://repos.fedorapeople.org/repos/pulp/pulp/beta/2.4
+    puppet_manifest: /home/jcline/devel/pulp/playpen/deploy/puppet/pulp-consumer.pp
+    hostname: pulp-consumer1
 
 structure:
-    instance:
-        distribution: el7
-        instance_name: el7-pulp-server
-        security_group: pulp
-        flavor: m1.medium
-        os1_key: jcline-key
-        cloud_config: /home/jcline/devel/pulp/playpen/deploy/cloud-init/cloud-config.txt
-        private_key: /home/jcline/.ssh/id_rsa
-        role: server
-        repository: http://repos.fedorapeople.org/repos/pulp/pulp/beta/2.4
-        puppet_manifest: /home/jcline/devel/pulp/playpen/deploy/puppet/pulp-server.pp
-        hostname: pulp-server
+    distribution: el7
+    instance_name: el7-pulp-server
+    security_group: pulp
+    flavor: m1.medium
+    os1_key: jcline-key
+    cloud_config: /home/jcline/devel/pulp/playpen/deploy/cloud-init/cloud-config.txt
+    private_key: /home/jcline/.ssh/id_rsa
+    role: server
+    repository: http://repos.fedorapeople.org/repos/pulp/pulp/beta/2.4
+    puppet_manifest: /home/jcline/devel/pulp/playpen/deploy/puppet/pulp-server.pp
+    hostname: pulp-server
     children:
-        - *consumer
+        - *consumer1
 
 pulp_tester:
     distribution: fc20
@@ -39,7 +37,7 @@ pulp_tester:
     role: tester
     os_name: Fedora
     os_version: 20
-    tests_destination: fc19/pulp_integration_tests.xml
+    tests_destination: el7/pulp_integration_tests.xml
 
 os1_credentials:
     username: jcline

@@ -9,7 +9,4 @@ set -x
 WORKSPACE="$(readlink -f $( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/../../../)"
 
 cd ${WORKSPACE}/pulp/playpen/deploy
-openstack/deploy-environment.py --os1-key ${OS1_KEY_NAME} --key-file ${KEY_FILE} --repository ${PULP_REPOSITORY} \
---server-puppet puppet/pulp-server.pp --consumer-puppet puppet/pulp-consumer.pp --distribution=${DISTRIBUTION} \
---consumer-hostname=${CONSUMER_HOSTNAME} --server-hostname=${SERVER_HOSTNAME} --tester-hostname=${TESTER_HOSTNAME}
-
+openstack/deploy-environment.py --integration-tests --config ${DISTRIBUTION}-config --repo ${PULP_REPOSITORY}
