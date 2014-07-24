@@ -31,6 +31,7 @@ SYSTEM_USER = 'user'
 CLOUD_CONFIG = 'cloud_config'
 NOVA_SERVER = 'server'
 CHILDREN = 'children'
+REPOSITORY_URL = 'repository'
 
 # This is the bare minimum an instance configuration can contain
 INSTANCE_CONFIG_KEYWORDS = [DISTRIBUTION, INSTANCE_NAME, HOSTNAME, SECURITY_GROUP, FLAVOR, OS1_KEY,
@@ -61,7 +62,7 @@ def build_instances(instance_structure, metadata=None):
         cloud_config = instance.get(CLOUD_CONFIG)
         server = os1.create_instance(image.id, instance[INSTANCE_NAME], instance[SECURITY_GROUP],
                                      instance[FLAVOR], instance[OS1_KEY], metadata, cloud_config)
-        instance[SYSTEM_USER] = image.metadata['user'].encode('ascii')
+        instance[SYSTEM_USER] = image.metadata[SYSTEM_USER].encode('ascii')
         instance[NOVA_SERVER] = server
 
         # Build any children
@@ -82,10 +83,11 @@ def configure_instance(instance_config):
     :rtype:  dict
     """
     # Gather the necessary configuration arguments
-    instance_config['host_string'] = instance_config['user'] + '@' + os1.get_instance_ip(instance_config['server'])
+    instance_ip = os1.get_instance_ip(instance_config[NOVA_SERVER])
+    instance_config[HOST_STRING] = instance_config[SYSTEM_USER] + '@' + instance_ip
     if args.repo:
-        instance_config['repository'] = args.repo
-    config_function = CONFIGURATION_FUNCTIONS[instance_config['role']]
+        instance_config[REPOSITORY_URL] = args.repo
+    config_function = CONFIGURATION_FUNCTIONS[instance_config[ROLE]]
     config_result = config_function(**instance_config)
 
     # Add the instance configuration to the configuration results
@@ -120,27 +122,6 @@ def configure_instances(instance_structure):
             for child in children:
                 child['parent_config'] = instance
             configure_instances(children)
-
-
-def _configure_child_instances(child_list):
-    """
-    A helper method to configure a list of child instances
-
-    :param child_list: A list of configuration dictionaries,
-    :return:
-    """
-    for instance_config in child_list:
-        # Configure the instance
-        config_result = configure_instance(instance_config)
-
-        instance_config = dict(instance_config.items() + config_result.items())
-
-        # Deal with any of its children
-        if CHILDREN in instance_config:
-            children = instance_config[CHILDREN]
-            for child in children:
-                child['parent_config'] = instance_config
-            _configure_child_instances(children)
 
 
 def parse_config_file(config_path):
@@ -316,7 +297,7 @@ def run_deployment():
                 print 'Skipping test machine; your configuration file does not specify a single server and consumer'
 
             sys.exit(test_results.return_code)
-    except Exception, e:
+    except BaseException, e:
         # Print exception message and quit
         print 'Error: %s' % e
         sys.exit(1)

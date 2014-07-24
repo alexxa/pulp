@@ -265,9 +265,10 @@ def configure_tester(host_string, private_key, **kwargs):
     :type  private_key:         str
     :param server_config:       The configuration dictionary from the Pulp server, which is expected
     to contain the hostname and host_string
-    :type  server_hostname:     str
-    :param consumer_hostname:   The hostname of the Pulp consumer
-    :type  consumer_hostname:   str
+    :type  server_config:       dict
+    :param consumer_config:     he configuration dictionary from the Pulp consumer, which is expected
+    to contain the hostname and host_string
+    :type  consumer_config:     dict
     :param os_name:             The operating system name to be used in the inventory.yml file.
     :type  os_name:             str
     :param os_version:          The version of the operating system.
@@ -285,6 +286,8 @@ def configure_tester(host_string, private_key, **kwargs):
     consumer_ip = kwargs['consumer_config']['host_string'].split('@')[1]
 
     with settings(host_string=host_string, key_file=private_key):
+        fabric_confirm_ssh_key(host_string, private_key)
+
         # Install necessary dependencies.
         print 'Installing necessary test dependencies... '
         with hide('stdout'):
